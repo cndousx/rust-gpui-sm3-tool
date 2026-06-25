@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use gpui::*;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
@@ -107,7 +108,6 @@ fn format_bytes(size: usize) -> String {
 }
 impl Render for FilePickerApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-     
         // if let Some((_, ref rx)) = self.channel {
         //     if let Ok(msg) = rx.try_recv() {
         //         match msg {

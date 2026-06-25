@@ -15,3 +15,9 @@ anyhow = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] } # 用于后台计算
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+strip = true
+debug = false
+opt-level = 3
+codegen-units = 1 # 减少代码生成单元，提升单线程性能
