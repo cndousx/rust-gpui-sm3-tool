@@ -29,7 +29,14 @@ impl FilePickerApp {
         }
     }
 
+    fn is_calculating(&self) -> bool {
+        self.progress.is_some()
+    }
+
     fn calculate_sm3_hash(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.is_calculating() {
+            return; // 防止重复点击
+        }
         // 取消旧任务
         self.current_task = None;
         self.file_sm3_hash = None;
@@ -133,6 +140,7 @@ fn format_bytes(size: usize) -> String {
 
 impl Render for FilePickerApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_calculating = self.is_calculating();
         div()
             .flex()
             .flex_col()
@@ -152,18 +160,41 @@ impl Render for FilePickerApp {
                             .id("pick_file")
                             .px_10()
                             .py_3()
-                            .bg(rgb(0x3b82f6))
-                            .hover(|s| s.bg(rgb(0x2563eb)))
-                            .active(|s| s.bg(rgb(0x1e40af)))
                             .rounded_lg()
-                            .cursor_pointer()
                             .text_xl()
-                            .child("选择文件")
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                if let Some(path) =
-                                    FileDialog::new().set_title("选择一个文件").pick_file()
-                                {
-                                    this.calculate_sm3_hash(path, cx);
+                            .cursor_pointer()
+                            .bg(if is_calculating {
+                                rgb(0x64748b)
+                            } else {
+                                rgb(0x3b82f6)
+                            })
+                            .hover(|s| {
+                                if !is_calculating {
+                                    s.bg(rgb(0x2563eb))
+                                } else {
+                                    s
+                                }
+                            })
+                            .active(|s| {
+                                if !is_calculating {
+                                    s.bg(rgb(0x1e40af))
+                                } else {
+                                    s
+                                }
+                            })
+                            .child(if is_calculating {
+                                "计算中... (请等待)"
+                            } else {
+                                "选择文件"
+                            })
+                            // 只在非计算状态时绑定点击事件
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                if !is_calculating {
+                                    if let Some(path) =
+                                        FileDialog::new().set_title("选择一个文件").pick_file()
+                                    {
+                                        this.calculate_sm3_hash(path, cx);
+                                    }
                                 }
                             })),
                     )
