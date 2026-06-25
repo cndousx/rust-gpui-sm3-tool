@@ -17,7 +17,8 @@ hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 
 [profile.release]
-strip = true
-debug = false
 opt-level = 3
-codegen-units = 1 # 减少代码生成单元，提升单线程性能
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
