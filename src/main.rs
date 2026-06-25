@@ -140,16 +140,31 @@ fn format_bytes(size: usize) -> String {
 }
 
 impl Render for FilePickerApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_calculating = self.is_calculating();
+        let is_dark = match window.appearance() {
+            WindowAppearance::Dark | WindowAppearance::VibrantDark => true,
+            _ => false,
+        };
+        let bg_color = if is_dark {
+            rgb(0x1e1e1e) // 深色背景（你原来的颜色）
+        } else {
+            rgb(0xf8f9fa) // 浅色背景（推荐）
+        };
+
+        let text_color = if is_dark {
+            rgb(0xffffff)
+        } else {
+            rgb(0x111111)
+        };
         div()
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
             .size_full()
-            .bg(rgb(0x1e1e1e))
-            .text_color(rgb(0xffffff))
+            .bg(bg_color)
+            .text_color(text_color)
             .child(
                 div()
                     .flex()
@@ -248,7 +263,18 @@ fn main() {
                 ))),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_| FilePickerApp::new()),
+            |window, cx| {
+                let view = cx.new(|_| FilePickerApp::new());
+                // 监听系统主题变化
+                window
+                    .observe_window_appearance(|_window, _cx| {
+                        // 使用 window.refresh() 触发重绘
+                        _window.refresh();
+                    })
+                    .detach();
+
+                view
+            },
         )
         .unwrap();
     });
