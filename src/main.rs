@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use rfd::FileDialog;
 use sm3::Digest;
@@ -187,16 +188,17 @@ impl Render for FilePickerApp {
                             } else {
                                 "选择文件"
                             })
-                            // 只在非计算状态时绑定点击事件
-                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                if !is_calculating {
-                                    if let Some(path) =
-                                        FileDialog::new().set_title("选择一个文件").pick_file()
-                                    {
-                                        this.calculate_sm3_hash(path, cx);
+                            .when(!is_calculating, |this| {
+                                this.on_click(cx.listener(move |this, _, _window, cx| {
+                                    if !is_calculating {
+                                        if let Some(path) =
+                                            FileDialog::new().set_title("选择一个文件").pick_file()
+                                        {
+                                            this.calculate_sm3_hash(path, cx);
+                                        }
                                     }
-                                }
-                            })),
+                                }))
+                            }),
                     )
                     .child(if let Some(path) = &self.selected_file {
                         div()
