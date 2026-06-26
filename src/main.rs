@@ -10,7 +10,6 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-
 struct FilePickerApp {
     selected_file: Option<PathBuf>,
     file_byte_len: Option<u64>,
@@ -233,11 +232,44 @@ impl Render for FilePickerApp {
                                     .text_color(rgb(0x60a5fa))
                                     .child(format!("大小: {}", self.format_bytes_len())),
                             )
-                            .child(
+                            .child(if let Some(hash) = &self.file_sm3_hash {
+                                let sm3 = String::from(hash.as_str());
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .w_full()
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xfbbf24))
+                                            .child(format!("SM3: {}", &sm3)),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("copy_btn")
+                                            .px_2()
+                                            .py_0()
+                                            .rounded_lg()
+                                            .bg(rgb(0x1e40af))
+                                            .text_color(rgb(0xbfdbfe))
+                                            .text_sm()
+                                            .cursor_pointer()
+                                            .hover(|s| s.bg(rgb(0x2563eb)))
+                                            .active(|s| s.bg(rgb(0x1e3a8a)))
+                                            .child("复制")
+                                            .on_click(cx.listener(move |_, _, _window, cx| {
+                                                cx.write_to_clipboard(
+                                                    gpui::ClipboardItem::new_string(sm3.clone()),
+                                                );
+
+                                                // window.push_notification("✅ SM3 哈希已复制", cx);
+                                            })),
+                                    )
+                            } else {
                                 div()
                                     .text_color(rgb(0xfbbf24))
-                                    .child(format!("SM3: {}", self.get_progress_text())),
-                            )
+                                    .child(format!("SM3: {}", self.get_progress_text()))
+                            })
                     } else {
                         div()
                             .text_color(rgb(0x888888))
