@@ -281,7 +281,7 @@ impl Render for FilePickerApp {
 }
 
 fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
+    gpui_platform::application().run(|cx| {
         cx.open_window(
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
