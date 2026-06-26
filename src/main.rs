@@ -174,8 +174,8 @@ impl Render for FilePickerApp {
                     .child(
                         div()
                             .id("pick_file")
-                            .px_10()
-                            .py_3()
+                            .px_8()
+                            .py_1()
                             .rounded_lg()
                             .text_xl()
                             .cursor_pointer()
