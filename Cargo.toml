@@ -2,17 +2,19 @@
 name = "rust-gpui-sm3-tool"
 version = "0.1.0"
 edition = "2024"
-
 build = "build.rs"
+
+
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
     "font-kit",
 ] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-rfd = "0.17.2" # 跨平台文件选择对话框
-sm3 = "0.5"
 anyhow = "1.0"
+# 跨平台文件选择对话框
+rfd = "0.17.2"
+sm3 = "0.5"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
