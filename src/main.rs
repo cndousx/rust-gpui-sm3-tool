@@ -3,6 +3,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use rfd::FileDialog;
+use rfd::{MessageDialog, MessageLevel};
 use sm3::Digest;
 use sm3::Sm3;
 use std::fs::File;
@@ -262,7 +263,11 @@ impl Render for FilePickerApp {
                                                     gpui::ClipboardItem::new_string(sm3.clone()),
                                                 );
 
-                                                // window.push_notification("✅ SM3 哈希已复制", cx);
+                                                MessageDialog::new()
+                                                    .set_level(MessageLevel::Info)
+                                                    .set_title("提示")
+                                                    .set_description("SM3已复制到剪贴板")
+                                                    .show();
                                             })),
                                     )
                             } else {
