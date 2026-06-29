@@ -10,12 +10,12 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 struct FilePickerApp {
     selected_file: Option<PathBuf>,
-    file_byte_len: Option<u64>,
+    file_byte_len: Option<usize>,
     file_sm3_hash: Option<String>,
-    progress: Option<Arc<AtomicU64>>,
+    progress: Option<Arc<AtomicUsize>>,
     current_task: Option<Task<()>>,
 }
 
@@ -43,8 +43,10 @@ impl FilePickerApp {
         self.file_sm3_hash = None;
         self.progress = None;
 
-        let total_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let progress = Arc::new(AtomicU64::new(0));
+        let total_size = std::fs::metadata(&path)
+            .map(|m| m.len() as usize)
+            .unwrap_or(0usize);
+        let progress = Arc::new(AtomicUsize::new(0));
         self.progress = Some(Arc::clone(&progress));
         self.file_byte_len = Some(total_size);
         self.selected_file = Some(path.clone());
@@ -57,18 +59,25 @@ impl FilePickerApp {
                         Ok(f) => f,
                         Err(_) => return None,
                     };
-
+                    let file_name = path.file_name().unwrap().to_str().unwrap();
                     let mut hasher = Sm3::new();
                     let mut buffer = vec![0u8; 512 * 1024]; // 512KB buffer
                     let mut read_total = 0usize;
-
+                    let mut rate_pre = 0usize;
                     loop {
                         match file.read(&mut buffer) {
                             Ok(0) => break,
                             Ok(n) => {
                                 hasher.update(&buffer[..n]);
                                 read_total += n;
-                                progress.store(read_total as u64, Ordering::Relaxed);
+                                // 进度百分比的整数部分
+                                let rate = read_total * 100 / total_size;
+                                if rate - rate_pre >= 1 {
+                                    // todo!("这里每增加超过1%，应该让ui刷新一次。");
+                                    println!("[{file_name}]calculate progress: {rate}%");
+                                    rate_pre = rate;
+                                    progress.store(read_total, Ordering::Relaxed);
+                                }
                             }
                             Err(_) => return None,
                         }
@@ -101,16 +110,16 @@ impl FilePickerApp {
             let percent = if total == 0 {
                 0
             } else {
-                ((done as f64 / total as f64) * 100.0) as u32
+                (done * 100 / total) as u32
             };
-            let progress_str = format!(
+            let _ = format!(
                 "计算中... {}% ({} / {})",
                 percent,
                 format_bytes(done as usize),
                 format_bytes(total as usize)
             );
-            println!("{progress_str}");
-            //  ui刷新不流畅，暂时先不展示进度
+            // println!("{progress_str}");
+            //  ui刷新不流畅，暂时先不展示进度,store了100次，这里是ui自动刷新的，调用次数不一定是100次，所以ui会有不流畅的感觉
             "计算中...".to_string()
         } else {
             "尚未选择文件".to_string()
