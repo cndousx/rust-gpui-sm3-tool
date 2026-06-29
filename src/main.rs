@@ -10,13 +10,17 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
 struct FilePickerApp {
     selected_file: Option<PathBuf>,
     file_byte_len: Option<usize>,
     file_sm3_hash: Option<String>,
     progress: Option<Arc<AtomicUsize>>,
-    current_task: Option<Task<()>>,
+    calculate_task: Option<Task<()>>,
+    refresh_ui_task: Option<Task<()>>,
 }
 
 impl FilePickerApp {
@@ -26,7 +30,8 @@ impl FilePickerApp {
             file_byte_len: None,
             file_sm3_hash: None,
             progress: None,
-            current_task: None,
+            calculate_task: None,
+            refresh_ui_task: None,
         }
     }
 
@@ -39,7 +44,8 @@ impl FilePickerApp {
             return; // 防止重复点击
         }
         // 取消旧任务
-        self.current_task = None;
+        self.calculate_task = None;
+        self.refresh_ui_task = None;
         self.file_sm3_hash = None;
         self.progress = None;
 
@@ -51,7 +57,7 @@ impl FilePickerApp {
         self.file_byte_len = Some(total_size);
         self.selected_file = Some(path.clone());
 
-        let task = cx.spawn(async move |this, cx| {
+        self.calculate_task = Some(cx.spawn(async move |this, cx| {
             // 在后台线程执行计算
             let hash_result: Option<String> = cx
                 .background_spawn(async move {
@@ -97,9 +103,24 @@ impl FilePickerApp {
                 app.progress = None;
                 cx.notify();
             });
-        });
+        }));
 
-        self.current_task = Some(task);
+        let mut interval_ticker = tokio::time::interval(Duration::from_millis(100));
+        self.refresh_ui_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                // 100毫秒刷新一次,需要tokio环境
+                interval_ticker.tick().await;
+                let is_done = this.update(cx, |app, cx| {
+                    //刷新ui
+                    cx.notify();
+                    !app.is_calculating()
+                });
+                if let Ok(true) = is_done {
+                    println!("计算结束, refresh ui break[let ok]");
+                    break;
+                }
+            }
+        }));
     }
 
     fn get_progress_text(&self) -> String {
@@ -112,15 +133,12 @@ impl FilePickerApp {
             } else {
                 (done * 100 / total) as u32
             };
-            let _ = format!(
+            format!(
                 "计算中... {}% ({} / {})",
                 percent,
                 format_bytes(done as usize),
                 format_bytes(total as usize)
-            );
-            // println!("{progress_str}");
-            //  ui刷新不流畅，暂时先不展示进度,store了100次，这里是ui自动刷新的，调用次数不一定是100次，所以ui会有不流畅的感觉
-            "计算中...".to_string()
+            )
         } else {
             "尚未选择文件".to_string()
         }
@@ -298,6 +316,11 @@ impl Render for FilePickerApp {
 }
 
 fn main() {
+    // 创建一个 Tokio runtime，但不阻塞主线程
+    let tokio_runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    // Runtime::new()返回的 Runtime对象必须保持存活（不能被 drop），否则 handle 会失效
+    // 不能用链式调用调用enter(), 用链式调用tokio_runtime会被提前drop
+    let _guard = tokio_runtime.enter(); // 只设置 handle，不阻塞
     gpui_platform::application().run(|cx| {
         cx.open_window(
             WindowOptions {
