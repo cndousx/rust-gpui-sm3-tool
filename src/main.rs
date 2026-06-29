@@ -147,9 +147,9 @@ impl Render for FilePickerApp {
             _ => false,
         };
         let bg_color = if is_dark {
-            rgb(0x1e1e1e) // 深色背景（你原来的颜色）
+            rgb(0x1e1e1e) // 深色背景
         } else {
-            rgb(0xf8f9fa) // 浅色背景（推荐）
+            rgb(0xf8f9fa) // 浅色背景
         };
 
         let text_color = if is_dark {
