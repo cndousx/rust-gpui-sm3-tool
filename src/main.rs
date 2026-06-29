@@ -103,12 +103,15 @@ impl FilePickerApp {
             } else {
                 ((done as f64 / total as f64) * 100.0) as u32
             };
-            format!(
+            let progress_str = format!(
                 "计算中... {}% ({} / {})",
                 percent,
                 format_bytes(done as usize),
                 format_bytes(total as usize)
-            )
+            );
+            println!("{progress_str}");
+            //  ui刷新不流畅，暂时先不展示进度
+            "计算中...".to_string()
         } else {
             "尚未选择文件".to_string()
         }
