@@ -1,0 +1,3 @@
+# 在 Windows + MSVC 环境下生成静态链接的二进制文件
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
