@@ -127,7 +127,7 @@ impl FilePickerApp {
     /// u32 进度百分比的整数部分
     fn get_progress_info(&self) -> (String, f32) {
         if let Some(hash) = &self.file_sm3_hash {
-            (hash.clone(), 100.0)
+            (hash.clone(), 100.)
         } else if let (Some(progress), Some(total)) = (&self.progress, self.file_byte_len) {
             let done = progress.load(Ordering::Relaxed);
             let percent = if total == 0 {
@@ -145,7 +145,7 @@ impl FilePickerApp {
                 percent as f32,
             )
         } else {
-            ("尚未选择文件".to_string(), 0.0)
+            ("尚未选择文件".to_string(), 0.)
         }
     }
 
@@ -159,14 +159,14 @@ fn format_bytes(size: usize) -> String {
     let mut s = size as f64;
     let mut unit_idx = 0;
 
-    while s >= 1024.0 && unit_idx < UNITS.len() - 1 {
-        s /= 1024.0;
+    while s >= 1024. && unit_idx < UNITS.len() - 1 {
+        s /= 1024.;
         unit_idx += 1;
     }
 
-    let precision = if s < 10.0 {
+    let precision = if s < 10. {
         2
-    } else if s < 100.0 {
+    } else if s < 100. {
         1
     } else {
         0
@@ -179,10 +179,10 @@ fn format_bytes(size: usize) -> String {
 /// [`progress`]取值是0到100
 ///
 fn sm3_progress_bar(progress: f32) -> impl IntoElement {
-    if progress < 0.0 || progress > 100.0 {
+    if progress < 0. || progress > 100. {
         panic!("param error")
     }
-    let pct = (progress / 100.0).clamp(0.0, 1.0);
+    let pct = (progress / 100.).clamp(0., 1.);
     div()
         .w_full()
         .h(px(6.))
