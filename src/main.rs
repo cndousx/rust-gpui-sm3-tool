@@ -122,10 +122,12 @@ impl FilePickerApp {
             }
         }));
     }
-
-    fn get_progress_text(&self) -> String {
+    /// 获取进度信息
+    /// string 文本 计算进度以及文件大小
+    /// u32 进度百分比的整数部分
+    fn get_progress_info(&self) -> (String, f32) {
         if let Some(hash) = &self.file_sm3_hash {
-            hash.clone()
+            (hash.clone(), 100.0)
         } else if let (Some(progress), Some(total)) = (&self.progress, self.file_byte_len) {
             let done = progress.load(Ordering::Relaxed);
             let percent = if total == 0 {
@@ -133,14 +135,17 @@ impl FilePickerApp {
             } else {
                 (done * 100 / total) as u32
             };
-            format!(
-                "计算中... {}% ({} / {})",
-                percent,
-                format_bytes(done as usize),
-                format_bytes(total as usize)
+            (
+                format!(
+                    "计算中... {}% ({} / {})",
+                    percent,
+                    format_bytes(done as usize),
+                    format_bytes(total as usize)
+                ),
+                percent as f32,
             )
         } else {
-            "尚未选择文件".to_string()
+            ("尚未选择文件".to_string(), 0.0)
         }
     }
 
@@ -167,6 +172,33 @@ fn format_bytes(size: usize) -> String {
         0
     };
     format!("{:.prec$} {}", s, UNITS[unit_idx], prec = precision)
+}
+
+/// 进度条
+///
+/// [`progress`]取值是0到100
+///
+fn sm3_progress_bar(progress: f32) -> impl IntoElement {
+    if progress < 0.0 || progress > 100.0 {
+        panic!("param error")
+    }
+    let pct = (progress / 100.0).clamp(0.0, 1.0);
+    div()
+        .w_full()
+        .h(px(6.))
+        .rounded_full()
+        .bg(rgb(0x374151)) // 轨道色
+        .relative()
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .h_full()
+                .w(relative(pct))
+                .rounded_full()
+                .bg(rgb(0xfbbf24)), // 填充色黄
+        )
 }
 
 impl Render for FilePickerApp {
@@ -301,9 +333,19 @@ impl Render for FilePickerApp {
                                             })),
                                     )
                             } else {
+                                let (text, percent) = self.get_progress_info();
+                                // 纵向叠: 文字 + 进度条
                                 div()
-                                    .text_color(rgb(0xfbbf24))
-                                    .child(format!("SM3: {}", self.get_progress_text()))
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .w_full()
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xfbbf24))
+                                            .child(format!("SM3: {}", text)),
+                                    )
+                                    .child(sm3_progress_bar(percent))
                             })
                     } else {
                         div()
