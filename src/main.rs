@@ -122,8 +122,11 @@ impl FilePickerApp {
             }
         }));
     }
+
     /// 获取进度信息
+    ///
     /// string 文本 计算进度以及文件大小
+    ///
     /// u32 进度百分比的整数部分
     fn get_progress_info(&self) -> (String, f32) {
         if let Some(hash) = &self.file_sm3_hash {
@@ -285,11 +288,11 @@ impl Render for FilePickerApp {
                             .gap_3()
                             .w_full()
                             .max_w(px(700.))
-                            .child(
-                                div()
-                                    .text_color(rgb(0x22c55e))
-                                    .child(format!("文件: {}", path.display())),
-                            )
+                            .min_w(px(700.))
+                            .child(div().text_color(rgb(0x22c55e)).child(format!(
+                                "文件: {}",
+                                path.file_name().unwrap().to_str().unwrap()
+                            )))
                             .child(
                                 div()
                                     .text_color(rgb(0x60a5fa))
@@ -372,7 +375,7 @@ fn main() {
                 }),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(860.), px(520.)),
+                    size(px(750.), px(450.)),
                     cx,
                 ))),
                 ..Default::default()
