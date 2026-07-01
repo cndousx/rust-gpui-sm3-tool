@@ -14,6 +14,13 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+/// 单位
+///
+/// - GB（Gigabyte）：按十进制，1 GB = 10³ MB = 10⁹ 字节 = 1,000,000,000 B
+///
+/// - GiB（Gibibyte）：按二进制，1 GiB = 2¹⁰ MiB = 2³⁰ 字节 = 1,073,741,824 B
+const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+
 struct FilePickerApp {
     selected_file: Option<PathBuf>,
     file_byte_len: Option<usize>,
@@ -79,7 +86,7 @@ impl FilePickerApp {
                                 // 进度百分比的整数部分
                                 let rate = read_total * 100 / total_size;
                                 if rate - rate_pre >= 1 {
-                                    // todo!("这里每增加超过1%，应该让ui刷新一次。");
+                                    // 这里每增加超过1%，应该让ui刷新一次。
                                     println!("[{file_name}]calculate progress: {rate}%");
                                     rate_pre = rate;
                                     progress.store(read_total, Ordering::Relaxed);
@@ -104,7 +111,7 @@ impl FilePickerApp {
                 cx.notify();
             });
         }));
-
+        // 说明：interval_ticker的间隔不易过短，设置过短会影响sm3计算速度。设置100毫秒(即1秒刷新10次UI)对计算影响不大
         let mut interval_ticker = tokio::time::interval(Duration::from_millis(100));
         self.refresh_ui_task = Some(cx.spawn(async move |this, cx| {
             loop {
@@ -158,10 +165,10 @@ impl FilePickerApp {
 }
 
 fn format_bytes(size: usize) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    // 只要文件大小不超过 9 PB，用 f64是完全精确的
     let mut s = size as f64;
-    let mut unit_idx = 0;
 
+    let mut unit_idx = 0;
     while s >= 1024. && unit_idx < UNITS.len() - 1 {
         s /= 1024.;
         unit_idx += 1;
