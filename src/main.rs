@@ -3,7 +3,6 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use rfd::FileDialog;
-use rfd::{MessageDialog, MessageLevel};
 use sm3::Digest;
 use sm3::Sm3;
 use std::fs::File;
@@ -28,6 +27,7 @@ struct FilePickerApp {
     progress: Option<Arc<AtomicUsize>>,
     calculate_task: Option<Task<()>>,
     refresh_ui_task: Option<Task<()>>,
+    toast: Option<(String, Task<()>)>,
 }
 
 impl FilePickerApp {
@@ -39,11 +39,28 @@ impl FilePickerApp {
             progress: None,
             calculate_task: None,
             refresh_ui_task: None,
+            toast: None,
         }
     }
 
     fn is_calculating(&self) -> bool {
         self.progress.is_some()
+    }
+
+    fn show_toast(&mut self, message: &str, cx: &mut Context<Self>) {
+        if let Some((_, task)) = self.toast.take() {
+            task.detach();
+        }
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            // 提示显示3秒，然后自动消失
+            let _ = this.update(cx, |app, cx| {
+                app.toast = None;
+                cx.notify();
+            });
+        });
+        self.toast = Some((message.to_string(), task));
+        cx.notify();
     }
 
     fn calculate_sm3_hash(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -230,6 +247,7 @@ impl Render for FilePickerApp {
             rgb(0x111111)
         };
         div()
+            .relative()
             .flex()
             .flex_col()
             .items_center()
@@ -330,16 +348,11 @@ impl Render for FilePickerApp {
                                             .hover(|s| s.bg(rgb(0x2563eb)))
                                             .active(|s| s.bg(rgb(0x1e3a8a)))
                                             .child("复制")
-                                            .on_click(cx.listener(move |_, _, _window, cx| {
+                                            .on_click(cx.listener(move |this, _, _window, cx| {
                                                 cx.write_to_clipboard(
                                                     gpui::ClipboardItem::new_string(sm3.clone()),
                                                 );
-
-                                                MessageDialog::new()
-                                                    .set_level(MessageLevel::Info)
-                                                    .set_title("提示")
-                                                    .set_description("SM3已复制到剪贴板")
-                                                    .show();
+                                                this.show_toast("SM3已复制到剪贴板", cx);
                                             })),
                                     )
                             } else {
@@ -364,6 +377,59 @@ impl Render for FilePickerApp {
                             .child("尚未选择文件")
                     }),
             )
+            // --- Toast 浮动提示---
+            .children(self.toast.as_ref().map(|(msg, _)| {
+                div()
+                    .absolute()
+                    .top(px(16.))
+                    .right(px(16.))
+                    .px_4()
+                    .py_2()
+                    .rounded_lg()
+                    .shadow_lg()
+                    .bg(if is_dark {
+                        rgb(0x2d3748)
+                    } else {
+                        rgb(0xffffff)
+                    })
+                    .border_1()
+                    .border_color(if is_dark {
+                        rgb(0x4a5568)
+                    } else {
+                        rgb(0xe2e8f0)
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                // 使用绿色勾号文本，避免 SVG 方法缺失
+                                div()
+                                    .size(px(20.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0x48bb78))
+                                            .text_lg()
+                                            .font_weight(FontWeight::BOLD)
+                                            .child("✓"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_color(if is_dark {
+                                        rgb(0xedf2f7)
+                                    } else {
+                                        rgb(0x2d3748)
+                                    })
+                                    .text_sm()
+                                    .child(msg.clone()),
+                            ),
+                    )
+            }))
     }
 }
 
@@ -396,7 +462,6 @@ fn main() {
                         _window.refresh();
                     })
                     .detach();
-
                 view
             },
         )
