@@ -1,6 +1,6 @@
 [package]
 name = "rust-gpui-sm3-tool"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 build = "build.rs"
 
@@ -27,7 +27,7 @@ winresource = "0.1"
 [package.metadata.winresource]
 FileDescription = "SM3摘要计算工具"
 ProductName = "SM3摘要工具"
-LegalCopyright = "Copyright © 2026"
+LegalCopyright = "dousx © 2026"
 CompanyName = "dousx"
 
 [profile.release]

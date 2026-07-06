@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use gpui::CursorStyle;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use rfd::FileDialog;
@@ -268,7 +269,11 @@ impl Render for FilePickerApp {
                             .py_1()
                             .rounded_lg()
                             .text_xl()
-                            .cursor_pointer()
+                            .cursor(if is_calculating {
+                                CursorStyle::OperationNotAllowed // 🚫 禁用符号
+                            } else {
+                                CursorStyle::PointingHand // 👆 小手
+                            })
                             .bg(if is_calculating {
                                 rgb(0x64748b)
                             } else {
