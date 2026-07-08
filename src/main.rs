@@ -206,7 +206,7 @@ fn format_bytes(size: usize) -> String {
 ///
 /// [`progress`]取值是0到100
 ///
-fn sm3_progress_bar(progress: f32) -> impl IntoElement {
+fn sm3_progress_bar(progress: f32, is_dark: bool) -> impl IntoElement {
     if progress < 0. || progress > 100. {
         panic!("param error")
     }
@@ -215,7 +215,11 @@ fn sm3_progress_bar(progress: f32) -> impl IntoElement {
         .w_full()
         .h(px(6.))
         .rounded_full()
-        .bg(rgb(0x374151)) // 轨道色
+        .bg(if is_dark {
+            rgb(0x374151)
+        } else {
+            rgb(0xa0acbf)
+        }) // 轨道色
         .relative()
         .child(
             div()
@@ -225,7 +229,11 @@ fn sm3_progress_bar(progress: f32) -> impl IntoElement {
                 .h_full()
                 .w(relative(pct))
                 .rounded_full()
-                .bg(rgb(0xfbbf24)), // 填充色黄
+                .bg(if is_dark {
+                    rgb(0xfbbf24)
+                } else {
+                    rgb(0xe68900)
+                }), // 填充色黄
         )
 }
 
@@ -383,10 +391,14 @@ impl Render for FilePickerApp {
                                     .w_full()
                                     .child(
                                         div()
-                                            .text_color(rgb(0xfbbf24))
+                                            .text_color(if is_dark {
+                                                rgb(0xfbbf24)
+                                            } else {
+                                                rgb(0xe68900)
+                                            })
                                             .child(format!("SM3: {}", text)),
                                     )
-                                    .child(sm3_progress_bar(percent))
+                                    .child(sm3_progress_bar(percent, is_dark))
                             })
                     } else {
                         div()
