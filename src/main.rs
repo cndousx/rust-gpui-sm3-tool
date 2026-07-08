@@ -236,17 +236,6 @@ impl Render for FilePickerApp {
             WindowAppearance::Dark | WindowAppearance::VibrantDark => true,
             _ => false,
         };
-        let bg_color = if is_dark {
-            rgb(0x1e1e1e) // 深色背景
-        } else {
-            rgb(0xf8f9fa) // 浅色背景
-        };
-
-        let text_color = if is_dark {
-            rgb(0xffffff)
-        } else {
-            rgb(0x111111)
-        };
         div()
             .relative()
             .flex()
@@ -254,8 +243,16 @@ impl Render for FilePickerApp {
             .items_center()
             .justify_center()
             .size_full()
-            .bg(bg_color)
-            .text_color(text_color)
+            .bg(if is_dark {
+                rgb(0x1e1e1e) // 深色背景
+            } else {
+                rgb(0xf8f9fa) // 浅色背景
+            })
+            .text_color(if is_dark {
+                rgb(0xffffff)
+            } else {
+                rgb(0xbfdbfe)
+            })
             .child(
                 div()
                     .flex()
@@ -319,13 +316,25 @@ impl Render for FilePickerApp {
                             .w_full()
                             .max_w(px(700.))
                             .min_w(px(700.))
-                            .child(div().text_color(rgb(0x22c55e)).child(format!(
-                                "文件: {}",
-                                path.file_name().unwrap().to_str().unwrap()
-                            )))
                             .child(
                                 div()
-                                    .text_color(rgb(0x60a5fa))
+                                    .text_color(if is_dark {
+                                        rgb(0x22c55e)
+                                    } else {
+                                        rgb(0x17843f)
+                                    })
+                                    .child(format!(
+                                        "文件: {}",
+                                        path.file_name().unwrap().to_str().unwrap()
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_color(if is_dark {
+                                        rgb(0x60a5fa)
+                                    } else {
+                                        rgb(0x167bf8)
+                                    })
                                     .child(format!("大小: {}", self.format_bytes_len())),
                             )
                             .child(if let Some(hash) = &self.file_sm3_hash {
@@ -337,7 +346,11 @@ impl Render for FilePickerApp {
                                     .w_full()
                                     .child(
                                         div()
-                                            .text_color(rgb(0xfbbf24))
+                                            .text_color(if is_dark {
+                                                rgb(0xfbbf24)
+                                            } else {
+                                                rgb(0xe68900)
+                                            })
                                             .child(format!("SM3: {}", &sm3)),
                                     )
                                     .child(
@@ -462,9 +475,9 @@ fn main() {
                 let view = cx.new(|_| FilePickerApp::new());
                 // 监听系统主题变化
                 window
-                    .observe_window_appearance(|_window, _cx| {
+                    .observe_window_appearance(|window, _cx| {
                         // 使用 window.refresh() 触发重绘
-                        _window.refresh();
+                        window.refresh();
                     })
                     .detach();
                 view
