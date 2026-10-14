@@ -14,12 +14,143 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use std::cell::RefCell;
+#[cfg(target_os = "windows")]
+use windows::Win32::{
+    Foundation::HWND,
+    System::Com::{CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx},
+    UI::Shell::{ITaskbarList3, TBPFLAG, TaskbarList},
+};
+
 /// 单位
 ///
 /// - GB（Gigabyte）：按十进制，1 GB = 10³ MB = 10⁹ 字节 = 1,000,000,000 B
 ///
 /// - GiB（Gibibyte）：按二进制，1 GiB = 2¹⁰ MiB = 2³⁰ 字节 = 1,073,741,824 B
 const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+
+// ---------------------------------------------------------------------------
+// Windows 任务栏进度（ITaskbarList3）
+// ---------------------------------------------------------------------------
+
+/// 本窗口对应的任务栏进度控制器
+///
+/// 只保存 HWND 的整数值，因此是 Send + Sync，可以随意放进 Entity / Task。
+/// 非 Windows 平台上所有方法都是空操作。
+///
+#[derive(Clone, Copy, Default)]
+pub struct TaskbarProgress(Option<isize>);
+
+impl TaskbarProgress {
+    pub fn new(hwnd: Option<isize>) -> Self {
+        Self(hwnd)
+    }
+
+    /// 确定进度：done / total 只取比例，传 (50,100) 和 (1,2) 等价
+    pub fn set(&self, done: u64, total: u64) {
+        #[cfg(target_os = "windows")]
+        {
+            if total == 0 {
+                return;
+            }
+            self.call(|list, hwnd| unsafe {
+                let _ = list.SetProgressValue(hwnd, done, total);
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (done, total);
+        }
+    }
+
+    /// 绿色正常进度（也是调用 set 时的隐含状态）
+    pub fn normal(&self) {
+        self.state(0x2) // TBPF_NORMAL
+    }
+    /// 走马灯，进度未知时使用
+    pub fn indeterminate(&self) {
+        self.state(0x1) // TBPF_INDETERMINATE
+    }
+    /// 黄色暂停
+    pub fn paused(&self) {
+        self.state(0x8) // TBPF_PAUSED
+    }
+    /// 红色错误
+    pub fn error(&self) {
+        self.state(0x4) // TBPF_ERROR
+    }
+    /// 收起进度条：任务完成 / 取消时必须调用，否则会一直卡在满格
+    pub fn clear(&self) {
+        self.state(0x0) // TBPF_NOPROGRESS
+    }
+
+    fn state(&self, flag: i32) {
+        #[cfg(target_os = "windows")]
+        {
+            self.call(|list, hwnd| unsafe {
+                let _ = list.SetProgressState(hwnd, TBPFLAG(flag));
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = flag;
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn call(&self, f: impl FnOnce(&ITaskbarList3, HWND)) {
+        let Some(raw) = self.0 else { return };
+        let hwnd = HWND(raw as *mut std::ffi::c_void);
+        if let Some(list) = taskbar_list() {
+            f(&list, hwnd);
+        }
+    }
+}
+
+/// ITaskbarList3 是 STA COM 对象，用 thread_local 缓存在 UI 线程上，不要跨线程共享。
+#[cfg(target_os = "windows")]
+fn taskbar_list() -> Option<ITaskbarList3> {
+    thread_local! {
+        static TBL: RefCell<Option<ITaskbarList3>> = RefCell::new(None);
+    }
+    TBL.with(|cell| {
+        if let Some(list) = cell.borrow().as_ref() {
+            return Some(list.clone());
+        }
+        unsafe {
+            // gpui 的 Windows 后端通常已经初始化过 COM，这里再调一次只是兜底，失败忽略
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let list: ITaskbarList3 = CoCreateInstance(&TaskbarList, None, CLSCTX_ALL).ok()?;
+            let _ = list.HrInit();
+            cell.borrow_mut().replace(list.clone());
+            Some(list)
+        }
+    })
+}
+
+/// 从 gpui 的 Window 里取系统 HWND。
+/// 注意：Window 既有同名的固有方法 window_handle()（返回 gpui 的 AnyWindowHandle），
+/// 所以拿系统句柄必须全限定调用 trait 方法。
+#[cfg(target_os = "windows")]
+fn taskbar_of_window(window: &Window) -> TaskbarProgress {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let hwnd = match HasWindowHandle::window_handle(window) {
+        Ok(handle) => match handle.as_raw() {
+            RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+            _ => None,
+        },
+        Err(_) => None,
+    };
+    TaskbarProgress::new(hwnd)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn taskbar_of_window(_window: &Window) -> TaskbarProgress {
+    TaskbarProgress::new(None)
+}
+
+// ---------------------------------------------------------------------------
 
 struct FilePickerApp {
     selected_file: Option<PathBuf>,
@@ -29,10 +160,11 @@ struct FilePickerApp {
     calculate_task: Option<Task<()>>,
     refresh_ui_task: Option<Task<()>>,
     toast: Option<(String, Task<()>)>,
+    taskbar: TaskbarProgress,
 }
 
 impl FilePickerApp {
-    fn new() -> Self {
+    fn new(taskbar: TaskbarProgress) -> Self {
         Self {
             selected_file: None,
             file_byte_len: None,
@@ -41,11 +173,22 @@ impl FilePickerApp {
             calculate_task: None,
             refresh_ui_task: None,
             toast: None,
+            taskbar,
         }
     }
 
     fn is_calculating(&self) -> bool {
         self.progress.is_some()
+    }
+
+    /// 把当前进度同步到任务栏（由 100ms 的刷新任务调用）
+    fn sync_taskbar(&self) {
+        if let (Some(progress), Some(total)) = (&self.progress, self.file_byte_len) {
+            if total > 0 {
+                self.taskbar
+                    .set(progress.load(Ordering::Relaxed) as u64, total as u64);
+            }
+        }
     }
 
     fn show_toast(&mut self, message: &str, cx: &mut Context<Self>) {
@@ -77,6 +220,15 @@ impl FilePickerApp {
         let total_size = std::fs::metadata(&path)
             .map(|m| m.len() as usize)
             .unwrap_or(0usize);
+
+        // 任务栏：先清掉上一次可能残留的 error/paused 状态，再从 0 开始
+        self.taskbar.normal();
+        if total_size > 0 {
+            self.taskbar.set(0, total_size as u64);
+        } else {
+            self.taskbar.indeterminate();
+        }
+
         let progress = Arc::new(AtomicUsize::new(0));
         self.progress = Some(Arc::clone(&progress));
         self.file_byte_len = Some(total_size);
@@ -102,7 +254,11 @@ impl FilePickerApp {
                                 hasher.update(&buffer[..n]);
                                 read_total += n;
                                 // 进度百分比的整数部分
-                                let rate = read_total * 100 / total_size;
+                                let rate = if total_size == 0 {
+                                    0
+                                } else {
+                                    read_total * 100 / total_size
+                                };
                                 if rate - rate_pre >= 1 {
                                     // 这里每增加超过1%，应该让ui刷新一次。
                                     println!("[{file_name}]calculate progress: {rate}%");
@@ -121,11 +277,29 @@ impl FilePickerApp {
 
             // 更新 UI
             let _ = this.update(cx, |app, cx| {
+                let ok = hash_result.is_some();
                 app.file_sm3_hash = match hash_result {
                     Some(hash) => Some(hash),
                     None => Some("计算失败".to_string()),
                 };
                 app.progress = None;
+
+                if ok {
+                    // 补满 100%，让用户看到"完成"，1.5 秒后再收起
+                    app.taskbar.set(total_size as u64, total_size as u64);
+                    let tb = app.taskbar;
+                    cx.spawn(async move |_this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(1500))
+                            .await;
+                        tb.clear();
+                    })
+                    .detach();
+                } else {
+                    // 失败：任务栏变红，保持到下一次操作
+                    app.taskbar.error();
+                }
+
                 cx.notify();
             });
         }));
@@ -136,7 +310,8 @@ impl FilePickerApp {
                 // 100毫秒刷新一次,需要tokio环境
                 interval_ticker.tick().await;
                 let is_done = this.update(cx, |app, cx| {
-                    //刷新ui
+                    // 刷新ui + 刷新任务栏进度
+                    app.sync_taskbar();
                     cx.notify();
                     !app.is_calculating()
                 });
@@ -484,7 +659,9 @@ fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let view = cx.new(|_| FilePickerApp::new());
+                // 窗口已创建，此时可以取到 HWND
+                let taskbar = taskbar_of_window(window);
+                let view = cx.new(|_| FilePickerApp::new(taskbar));
                 // 监听系统主题变化
                 window
                     .observe_window_appearance(|window, _cx| {

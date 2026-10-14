@@ -4416,16 +4416,18 @@ dependencies = [
 
 [[package]]
 name = "rust-gpui-sm3-tool"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "gpui",
  "gpui_platform",
  "hex",
+ "raw-window-handle",
  "rfd",
  "serde",
  "sm3",
  "tokio",
+ "windows 0.62.2",
  "winresource",
 ]
 
@@ -5328,9 +5330,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -6548,9 +6550,9 @@ dependencies = [
 
 [[package]]
 name = "winresource"
-version = "0.1.31"
+version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
 dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "version_check",
