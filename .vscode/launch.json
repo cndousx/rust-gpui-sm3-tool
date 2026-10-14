@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb", //  使用LLDB调试程序
+      "request": "launch", // "launch"：启动新的程序实例进行调试
+      "name": "Debug",
+      "cargo": {
+        // cargo相关配置
+        "args": ["build"],
+        "filter": {
+          "name": "sm3-tool",
+          "kind": "bin"
+        }
+      },
+      "args": ["--file=README.md"], // 程序启动参数
+      "cwd": "${workspaceFolder}" // 程序启动目录
+    },
+    {
+      "type": "lldb",
+      "request": "launch", // "launch"：启动新的程序实例进行调试
+      "name": "Release",
+      "cargo": {
+        // cargo相关配置
+        "args": ["build", "--release"],
+        "filter": {
+          "name": "sm3-tool",
+          "kind": "bin"
+        }
+      },
+      "args": ["--file=README.md"], // 程序启动参数
+      "cwd": "${workspaceFolder}" // 程序启动目录
+    }
+  ]
+}
