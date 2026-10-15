@@ -152,6 +152,13 @@ fn taskbar_of_window(_window: &Window) -> TaskbarProgress {
 
 // ---------------------------------------------------------------------------
 
+/// 半透明色：rgb + alpha（0.0~1.0）
+fn rgba_u32(rgb_val: u32, alpha: f32) -> Hsla {
+    let mut c = rgb(rgb_val);
+    c.a = alpha.clamp(0.0, 1.0);
+    c.into()
+}
+
 struct FilePickerApp {
     selected_file: Option<PathBuf>,
     file_byte_len: Option<usize>,
@@ -161,6 +168,8 @@ struct FilePickerApp {
     refresh_ui_task: Option<Task<()>>,
     toast: Option<(String, Task<()>)>,
     taskbar: TaskbarProgress,
+    /// 文件正在拖到窗口上方（尚未松开）时为 true，用于显示遮罩文字
+    is_dragging_over: bool,
 }
 
 impl FilePickerApp {
@@ -174,6 +183,41 @@ impl FilePickerApp {
             refresh_ui_task: None,
             toast: None,
             taskbar,
+            is_dragging_over: false,
+        }
+    }
+
+    /// 处理外部文件放下：只取第一个文件（与“选择文件”行为一致）
+    fn handle_file_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
+        self.is_dragging_over = false;
+        if self.is_calculating() {
+            self.show_toast("正在计算中，请等待完成后再拖入文件", cx);
+            return;
+        }
+        let path_list = paths.paths();
+        if path_list.is_empty() {
+            cx.notify();
+            return;
+        }
+        // 多于 1 个文件时提示，仍只处理第一个
+        if path_list.len() > 1 {
+            self.show_toast("一次只能计算一个文件，已选取第一个", cx);
+        }
+        if let Some(path) = paths.paths().first() {
+            // 只处理普通文件，忽略目录
+            if path.is_file() {
+                self.calculate_sm3_hash(path.clone(), cx);
+            } else {
+                self.show_toast("请拖入文件（不支持文件夹）", cx);
+            }
+        }
+        cx.notify();
+    }
+
+    fn set_dragging_over(&mut self, over: bool, cx: &mut Context<Self>) {
+        if self.is_dragging_over != over {
+            self.is_dragging_over = over;
+            cx.notify();
         }
     }
 
@@ -216,6 +260,7 @@ impl FilePickerApp {
         self.refresh_ui_task = None;
         self.file_sm3_hash = None;
         self.progress = None;
+        self.is_dragging_over = false;
 
         let total_size = std::fs::metadata(&path)
             .map(|m| m.len() as usize)
@@ -436,6 +481,28 @@ impl Render for FilePickerApp {
             } else {
                 rgb(0xbfdbfe)
             })
+            // 接收外部文件放下
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, cx| {
+                this.handle_file_drop(paths, cx);
+            }))
+            // 拖拽在窗口内移动时：打开遮罩（ExternalPaths = 系统文件拖入）
+            .on_drag_move(cx.listener(
+                |this, _event: &DragMoveEvent<ExternalPaths>, _window, cx| {
+                    this.set_dragging_over(true, cx);
+                },
+            ))
+            // 拖出窗口（未放下）时关闭遮罩
+            .on_file_drop_exit(cx.listener(|this, _event, _window, cx| {
+                this.set_dragging_over(false, cx);
+            }))
+            // 悬停时改根节点样式（拖出窗口后 GPUI 会自动取消此样式）
+            .drag_over::<ExternalPaths>(move |style, _paths, _window, _cx| {
+                style.bg(if is_dark {
+                    rgba_u32(0x1e3a8a, 0.55)
+                } else {
+                    rgba_u32(0x3b82f6, 0.45)
+                })
+            })
             .child(
                 div()
                     .flex()
@@ -476,7 +543,7 @@ impl Render for FilePickerApp {
                             .child(if is_calculating {
                                 "计算中... (请等待)"
                             } else {
-                                "选择文件"
+                                "选择 / 拖入文件"
                             })
                             .when(!is_calculating, |this| {
                                 this.on_click(cx.listener(move |this, _, _window, cx| {

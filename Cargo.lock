@@ -4010,7 +4010,7 @@ dependencies = [
 
 [[package]]
 name = "rust-gpui-sm3-tool"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "gpui",
