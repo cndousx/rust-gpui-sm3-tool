@@ -102,12 +102,53 @@ fn window_control_button(
         .child(glyph)
 }
 
-/// 自绘标题栏：左侧应用名，右侧最小化 / 最大化（还原）/ 关闭
+/// 标题栏上的主题切换按钮（不参与系统窗口控制区域）
+fn theme_toggle_button(
+    glyph: &'static str,
+    is_dark: bool,
+    text_color: Hsla,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let hover_bg: Hsla = if is_dark {
+        rgb(0x32353a).into()
+    } else {
+        rgb(0xe5e7eb).into()
+    };
+    let active_bg: Hsla = if is_dark {
+        rgb(0x3f4248).into()
+    } else {
+        rgb(0xd1d5db).into()
+    };
+
+    div()
+        .id("theme_toggle")
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(px(42.))
+        .h_full()
+        // occlude 避免点击被标题栏的拖动区域吞掉
+        .occlude()
+        .font_family("Segoe MDL2 Assets")
+        .text_size(px(12.))
+        .text_color(text_color)
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover_bg))
+        .active(move |style| style.bg(active_bg))
+        .child(glyph)
+        .on_click(on_click)
+}
+
+/// 自绘标题栏：左侧应用名，右侧主题切换 / 最小化 / 最大化（还原）/ 关闭
 fn app_titlebar(
     is_dark: bool,
     is_maximized: bool,
     muted_color: Hsla,
     body_color: Hsla,
+    bar_bg: Hsla,
+    bar_border: Hsla,
+    on_toggle_theme: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     div()
         .id("titlebar")
@@ -118,6 +159,10 @@ fn app_titlebar(
         .h(px(TITLEBAR_HEIGHT))
         .w_full()
         .pl(px(14.))
+        // 标题栏用比页面稍亮的底色 + 细分隔线，和页面背景区分开
+        .bg(bar_bg)
+        .border_b_1()
+        .border_color(bar_border)
         // 整条标题栏作为拖动区域：拖动移动窗口，双击最大化/还原
         .window_control_area(WindowControlArea::Drag)
         .child(
@@ -146,6 +191,12 @@ fn app_titlebar(
                 .flex_row()
                 .items_center()
                 .h_full()
+                .child(theme_toggle_button(
+                    if is_dark { "\u{e706}" } else { "\u{e708}" },
+                    is_dark,
+                    body_color,
+                    on_toggle_theme,
+                ))
                 .child(window_control_button(
                     "win_min",
                     "\u{e921}",
@@ -321,6 +372,8 @@ struct FilePickerApp {
     started_at: Option<Instant>,
     /// 计算结束后的总耗时，保证完成后计时不再继续增长
     finished_elapsed: Option<Duration>,
+    /// 用户手动选择的主题：None 表示跟随系统，Some(true) 深色，Some(false) 浅色
+    theme_override: Option<bool>,
 }
 
 impl FilePickerApp {
@@ -337,6 +390,7 @@ impl FilePickerApp {
             is_dragging_over: false,
             started_at: None,
             finished_elapsed: None,
+            theme_override: None,
         }
     }
 
@@ -688,10 +742,12 @@ fn info_row(
 impl Render for FilePickerApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_calculating = self.is_calculating();
-        let is_dark = matches!(
+        let system_dark = matches!(
             window.appearance(),
             WindowAppearance::Dark | WindowAppearance::VibrantDark
         );
+        // 默认跟随系统，用户点击标题栏按钮后以手动选择为准
+        let is_dark = self.theme_override.unwrap_or(system_dark);
 
         // 深色主题尽量贴近最终效果图；浅色主题使用对应的中性色。
         let (
@@ -790,6 +846,18 @@ impl Render for FilePickerApp {
             )
         };
 
+        let toggle_theme = cx.listener(
+            |this, _event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>| {
+                let system_dark = matches!(
+                    window.appearance(),
+                    WindowAppearance::Dark | WindowAppearance::VibrantDark
+                );
+                let currently_dark = this.theme_override.unwrap_or(system_dark);
+                this.theme_override = Some(!currently_dark);
+                cx.notify();
+            },
+        );
+
         div()
             .relative()
             .flex()
@@ -825,6 +893,9 @@ impl Render for FilePickerApp {
                 window.is_maximized(),
                 muted_color,
                 body_color,
+                card_bg,
+                divider_color,
+                toggle_theme,
             ))
             .child(
                 div()
