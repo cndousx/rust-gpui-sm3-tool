@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 #[cfg(target_os = "windows")]
 use std::cell::RefCell;
@@ -23,12 +24,15 @@ use windows::Win32::{
     UI::Shell::{ITaskbarList3, TBPFLAG, TaskbarList},
 };
 
-/// 单位
+/// 文件大小单位
 ///
-/// - GB（Gigabyte）：按十进制，1 GB = 10³ MB = 10⁹ 字节 = 1,000,000,000 B
-///
-/// - GiB（Gibibyte）：按二进制，1 GiB = 2¹⁰ MiB = 2³⁰ 字节 = 1,073,741,824 B
-const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+/// 数值按 1024 进制换算，单位使用界面上常见的 KB / MB / GB 写法。
+const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+
+// 界面图标（内嵌 SVG，GPUI 会按 text_color 着色）
+const ICON_FILE: &[u8] = include_bytes!("../resources/icons/file.svg");
+const ICON_FOLDER: &[u8] = include_bytes!("../resources/icons/folder.svg");
+const ICON_COPY: &[u8] = include_bytes!("../resources/icons/copy.svg");
 
 // ---------------------------------------------------------------------------
 // Windows 任务栏进度（ITaskbarList3）
@@ -170,6 +174,10 @@ struct FilePickerApp {
     taskbar: TaskbarProgress,
     /// 文件正在拖到窗口上方（尚未松开）时为 true，用于显示遮罩文字
     is_dragging_over: bool,
+    /// 本次计算开始的时间，用于界面上的计时显示
+    started_at: Option<Instant>,
+    /// 计算结束后的总耗时，保证完成后计时不再继续增长
+    finished_elapsed: Option<Duration>,
 }
 
 impl FilePickerApp {
@@ -184,6 +192,8 @@ impl FilePickerApp {
             toast: None,
             taskbar,
             is_dragging_over: false,
+            started_at: None,
+            finished_elapsed: None,
         }
     }
 
@@ -278,6 +288,9 @@ impl FilePickerApp {
         self.progress = Some(Arc::clone(&progress));
         self.file_byte_len = Some(total_size);
         self.selected_file = Some(path.clone());
+        let started_at = Instant::now();
+        self.started_at = Some(started_at);
+        self.finished_elapsed = None;
 
         self.calculate_task = Some(cx.spawn(async move |this, cx| {
             // 在后台线程执行计算
@@ -323,6 +336,7 @@ impl FilePickerApp {
             // 更新 UI
             let _ = this.update(cx, |app, cx| {
                 let ok = hash_result.is_some();
+                app.finished_elapsed = Some(started_at.elapsed());
                 app.file_sm3_hash = match hash_result {
                     Some(hash) => Some(hash),
                     None => Some("计算失败".to_string()),
@@ -368,38 +382,72 @@ impl FilePickerApp {
         }));
     }
 
-    /// 获取进度信息
-    ///
-    /// string 文本 计算进度以及文件大小
-    ///
-    /// u32 进度百分比的整数部分
-    fn get_progress_info(&self) -> (String, f32) {
-        if let Some(hash) = &self.file_sm3_hash {
-            (hash.clone(), 100.)
-        } else if let (Some(progress), Some(total)) = (&self.progress, self.file_byte_len) {
-            let done = progress.load(Ordering::Relaxed);
-            let percent = if total == 0 {
+    /// 当前进度百分比（0~100 的整数部分）
+    fn progress_percent(&self) -> u32 {
+        if self.file_sm3_hash.is_some() {
+            return 100;
+        }
+        if let (Some(progress), Some(total)) = (&self.progress, self.file_byte_len) {
+            if total == 0 {
                 0
             } else {
-                (done * 100 / total) as u32
-            };
-            (
-                format!(
-                    "计算中... {}% ({} / {})",
-                    percent,
-                    format_bytes(done as usize),
-                    format_bytes(total as usize)
-                ),
-                percent as f32,
-            )
+                (progress.load(Ordering::Relaxed) * 100 / total) as u32
+            }
         } else {
-            ("尚未选择文件".to_string(), 0.)
+            0
         }
     }
 
-    fn format_bytes_len(&self) -> String {
-        format_bytes(self.file_byte_len.unwrap_or(0) as usize)
+    /// 已处理字节数与文件总字节数
+    fn progress_bytes(&self) -> (usize, usize) {
+        let total = self.file_byte_len.unwrap_or(0);
+        if self.file_sm3_hash.is_some() {
+            (total, total)
+        } else {
+            (
+                self.progress
+                    .as_ref()
+                    .map(|p| p.load(Ordering::Relaxed))
+                    .unwrap_or(0),
+                total,
+            )
+        }
     }
+
+    /// 本次计算已用的时间，格式为 HH:MM:SS
+    fn format_elapsed(&self) -> String {
+        let secs = self
+            .finished_elapsed
+            .or_else(|| self.started_at.map(|start| start.elapsed()))
+            .unwrap_or_default()
+            .as_secs();
+        format!(
+            "{:02}:{:02}:{:02}",
+            secs / 3600,
+            (secs % 3600) / 60,
+            secs % 60
+        )
+    }
+
+    /// 文件大小详情，例如 "185.23 MB (194,225,123 字节)"
+    fn format_bytes_detail(&self) -> String {
+        let len = self.file_byte_len.unwrap_or(0);
+        format!("{} ({} 字节)", format_bytes(len), format_thousands(len))
+    }
+}
+
+/// 给整数加上千位分隔符
+fn format_thousands(value: usize) -> String {
+    let digits = value.to_string();
+    let bytes = digits.as_bytes();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, byte) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*byte as char);
+    }
+    out
 }
 
 fn format_bytes(size: usize) -> String {
@@ -412,33 +460,36 @@ fn format_bytes(size: usize) -> String {
         unit_idx += 1;
     }
 
-    let precision = if s < 10. {
-        2
-    } else if s < 100. {
-        1
-    } else {
-        0
-    };
+    let precision = if unit_idx == 0 { 0 } else { 2 };
     format!("{:.prec$} {}", s, UNITS[unit_idx], prec = precision)
 }
 
 /// 进度条
 ///
-/// [`progress`]取值是0到100
+/// [`progress`] 取值是 0 到 100
 ///
-fn sm3_progress_bar(progress: f32, is_dark: bool) -> impl IntoElement {
-    if progress < 0. || progress > 100. {
+fn sm3_progress_bar(progress: f32, is_dark: bool, is_error: bool) -> impl IntoElement {
+    if !(0. ..=100.).contains(&progress) {
         panic!("param error")
     }
     let pct = (progress / 100.).clamp(0., 1.);
+    let fill = if is_error {
+        if is_dark {
+            rgb(0xf87171)
+        } else {
+            rgb(0xdc2626)
+        }
+    } else {
+        rgb(0x3b82f6)
+    };
     div()
         .w_full()
-        .h(px(6.))
+        .h(px(10.))
         .rounded_full()
         .bg(if is_dark {
-            rgb(0x374151)
+            rgb(0x3a3d42)
         } else {
-            rgb(0xa0acbf)
+            rgb(0xe2e8f0)
         }) // 轨道色
         .relative()
         .child(
@@ -449,38 +500,160 @@ fn sm3_progress_bar(progress: f32, is_dark: bool) -> impl IntoElement {
                 .h_full()
                 .w(relative(pct))
                 .rounded_full()
-                .bg(if is_dark {
-                    rgb(0xfbbf24)
-                } else {
-                    rgb(0xe68900)
-                }), // 填充色黄
+                .bg(fill), // 填充色
+        )
+}
+
+fn icon(data: &'static [u8], size: f32, color: Hsla) -> impl IntoElement {
+    svg().data(data).w(px(size)).h(px(size)).text_color(color)
+}
+
+fn info_row(
+    icon_data: &'static [u8],
+    label: &'static str,
+    value: String,
+    icon_color: Hsla,
+    text_color: Hsla,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(12.))
+        .child(icon(icon_data, 19., icon_color))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .min_w_0()
+                .text_size(px(16.))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(text_color)
+                        .child(format!("{}：", label)),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(text_color)
+                        .child(value),
+                ),
         )
 }
 
 impl Render for FilePickerApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_calculating = self.is_calculating();
-        let is_dark = match window.appearance() {
-            WindowAppearance::Dark | WindowAppearance::VibrantDark => true,
-            _ => false,
+        let is_dark = matches!(
+            window.appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        );
+
+        // 深色主题尽量贴近最终效果图；浅色主题使用对应的中性色。
+        let (
+            bg_color,
+            title_color,
+            subtitle_color,
+            body_color,
+            muted_color,
+            card_bg,
+            card_border,
+            divider_color,
+            subtle_bg,
+            footer_color,
+        ): (Hsla, Hsla, Hsla, Hsla, Hsla, Hsla, Hsla, Hsla, Hsla, Hsla) = if is_dark {
+            (
+                rgb(0x1b1c1f).into(),
+                rgb(0xf4f4f5).into(),
+                rgb(0x9a9da3).into(),
+                rgb(0xe7e7ea).into(),
+                rgb(0x8d9198).into(),
+                rgb(0x212226).into(),
+                rgb(0x2e3034).into(),
+                rgb(0x2b2d31).into(),
+                rgb(0x292b2f).into(),
+                rgb(0x7f838a).into(),
+            )
+        } else {
+            (
+                rgb(0xf5f6f8).into(),
+                rgb(0x111827).into(),
+                rgb(0x6b7280).into(),
+                rgb(0x1f2937).into(),
+                rgb(0x6b7280).into(),
+                rgb(0xffffff).into(),
+                rgb(0xe5e7eb).into(),
+                rgb(0xe5e7eb).into(),
+                rgb(0xffffff).into(),
+                rgb(0x9ca3af).into(),
+            )
         };
+
+        let success_color: Hsla = if is_dark {
+            rgb(0x34d399).into()
+        } else {
+            rgb(0x059669).into()
+        };
+        let danger_color: Hsla = if is_dark {
+            rgb(0xf87171).into()
+        } else {
+            rgb(0xdc2626).into()
+        };
+        let primary_color: Hsla = rgb(0x3b82f6).into();
+
+        let has_file = self.selected_file.is_some();
+        let hash = self.file_sm3_hash.clone();
+        let is_failed = hash.as_deref() == Some("计算失败");
+        let is_complete = hash.as_deref().is_some_and(|h| h != "计算失败");
+        let percent = self.progress_percent();
+        let (done_bytes, total_bytes) = self.progress_bytes();
+        let percent_text = format!("{}%", percent);
+        let progress_size_text = format!(
+            "({} / {})",
+            format_bytes(done_bytes),
+            format_bytes(total_bytes)
+        );
+        let timer_text = self.format_elapsed();
+        let file_name = self
+            .selected_file
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("未知文件")
+            .to_string();
+        let file_detail = self.format_bytes_detail();
+
+        let (status_label, status_color, hint_text, hint_color) = if is_failed {
+            (
+                "计算失败".to_string(),
+                danger_color,
+                "计算失败，请重新选择文件后重试",
+                danger_color,
+            )
+        } else if is_complete {
+            (
+                "计算完成".to_string(),
+                success_color,
+                "计算完成，SM3摘要已生成",
+                success_color,
+            )
+        } else {
+            (
+                "计算中...".to_string(),
+                body_color,
+                "正在计算SM3摘要，请稍候...",
+                muted_color,
+            )
+        };
+
         div()
             .relative()
             .flex()
             .flex_col()
-            .items_center()
-            .justify_center()
             .size_full()
-            .bg(if is_dark {
-                rgb(0x1e1e1e) // 深色背景
-            } else {
-                rgb(0xf8f9fa) // 浅色背景
-            })
-            .text_color(if is_dark {
-                rgb(0xffffff)
-            } else {
-                rgb(0xbfdbfe)
-            })
+            .bg(bg_color)
+            .text_color(body_color)
             // 接收外部文件放下
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, cx| {
                 this.handle_file_drop(paths, cx);
@@ -505,199 +678,345 @@ impl Render for FilePickerApp {
             })
             .child(
                 div()
+                    .id("main_scroll")
                     .flex()
                     .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_y_scroll()
+                    .px(px(48.))
+                    .pt(px(34.))
+                    .pb(px(8.))
                     .items_center()
-                    .gap_8()
                     .child(
                         div()
-                            .id("pick_file")
-                            .px_8()
-                            .py_1()
-                            .rounded_lg()
-                            .text_xl()
-                            .cursor(if is_calculating {
-                                CursorStyle::OperationNotAllowed // 🚫 禁用符号
-                            } else {
-                                CursorStyle::PointingHand // 👆 小手
-                            })
-                            .bg(if is_calculating {
-                                rgb(0x64748b)
-                            } else {
-                                rgb(0x3b82f6)
-                            })
-                            .hover(|s| {
-                                if !is_calculating {
-                                    s.bg(rgb(0x2563eb))
-                                } else {
-                                    s
-                                }
-                            })
-                            .active(|s| {
-                                if !is_calculating {
-                                    s.bg(rgb(0x1e40af))
-                                } else {
-                                    s
-                                }
-                            })
-                            .child(if is_calculating {
-                                "计算中... (请等待)"
-                            } else {
-                                "选择 / 拖入文件"
-                            })
-                            .when(!is_calculating, |this| {
-                                this.on_click(cx.listener(move |this, _, _window, cx| {
-                                    if !is_calculating {
-                                        if let Some(path) =
-                                            FileDialog::new().set_title("选择一个文件").pick_file()
-                                        {
-                                            this.calculate_sm3_hash(path, cx);
-                                        }
-                                    }
-                                }))
-                            }),
-                    )
-                    .child(if let Some(path) = &self.selected_file {
-                        div()
+                            .w_full()
+                            .max_w(px(800.))
                             .flex()
                             .flex_col()
-                            .items_start()
-                            .gap_3()
-                            .w_full()
-                            .max_w(px(700.))
-                            .min_w(px(700.))
+                            // 标题
                             .child(
-                                div()
-                                    .text_color(if is_dark {
-                                        rgb(0x22c55e)
-                                    } else {
-                                        rgb(0x17843f)
-                                    })
-                                    .child(format!(
-                                        "文件: {}",
-                                        path.file_name().unwrap().to_str().unwrap()
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .text_color(if is_dark {
-                                        rgb(0x60a5fa)
-                                    } else {
-                                        rgb(0x167bf8)
-                                    })
-                                    .child(format!("大小: {}", self.format_bytes_len())),
-                            )
-                            .child(if let Some(hash) = &self.file_sm3_hash {
-                                let sm3 = String::from(hash.as_str());
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .w_full()
-                                    .child(
-                                        div()
-                                            .text_color(if is_dark {
-                                                rgb(0xfbbf24)
-                                            } else {
-                                                rgb(0xe68900)
-                                            })
-                                            .child(format!("SM3: {}", &sm3)),
-                                    )
-                                    .child(
-                                        div()
-                                            .id("copy_btn")
-                                            .px_2()
-                                            .py_0()
-                                            .rounded_lg()
-                                            .bg(rgb(0x1e40af))
-                                            .text_color(rgb(0xbfdbfe))
-                                            .text_sm()
-                                            .cursor_pointer()
-                                            .hover(|s| s.bg(rgb(0x2563eb)))
-                                            .active(|s| s.bg(rgb(0x1e3a8a)))
-                                            .child("复制")
-                                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                                cx.write_to_clipboard(
-                                                    gpui::ClipboardItem::new_string(sm3.clone()),
-                                                );
-                                                this.show_toast("SM3已复制到剪贴板", cx);
-                                            })),
-                                    )
-                            } else {
-                                let (text, percent) = self.get_progress_info();
-                                // 纵向叠: 文字 + 进度条
                                 div()
                                     .flex()
                                     .flex_col()
-                                    .gap_1()
-                                    .w_full()
+                                    .items_center()
                                     .child(
                                         div()
-                                            .text_color(if is_dark {
-                                                rgb(0xfbbf24)
-                                            } else {
-                                                rgb(0xe68900)
-                                            })
-                                            .child(format!("SM3: {}", text)),
+                                            .text_size(px(34.))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(title_color)
+                                            .child("SM3摘要计算工具"),
                                     )
-                                    .child(sm3_progress_bar(percent, is_dark))
-                            })
-                    } else {
-                        div()
-                            .text_color(rgb(0x888888))
-                            .text_lg()
-                            .child("尚未选择文件")
-                    }),
+                                    .child(
+                                        div()
+                                            .mt(px(8.))
+                                            .text_size(px(18.))
+                                            .text_color(subtitle_color)
+                                            .child("选择文件并计算 SM3 摘要"),
+                                    ),
+                            )
+                            // 选择文件按钮
+                            .child(
+                                div().mt(px(34.)).flex().justify_center().child(
+                                    div()
+                                        .id("pick_file")
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .gap(px(9.))
+                                        .w(px(200.))
+                                        .h(px(52.))
+                                        .rounded_lg()
+                                        .text_size(px(17.))
+                                        .text_color(rgb(0xffffff))
+                                        .cursor(if is_calculating {
+                                            CursorStyle::OperationNotAllowed
+                                        } else {
+                                            CursorStyle::PointingHand
+                                        })
+                                        .bg(if is_calculating {
+                                            rgb(0x4b5563)
+                                        } else {
+                                            rgb(0x3b82f6)
+                                        })
+                                        .hover(move |style| {
+                                            if is_calculating {
+                                                style
+                                            } else {
+                                                style.bg(rgb(0x2f74e8))
+                                            }
+                                        })
+                                        .active(move |style| {
+                                            if is_calculating {
+                                                style
+                                            } else {
+                                                style.bg(rgb(0x2563eb))
+                                            }
+                                        })
+                                        .child(icon(ICON_FOLDER, 20., rgb(0xffffff).into()))
+                                        .child(if is_calculating {
+                                            "计算中..."
+                                        } else {
+                                            "选择文件"
+                                        })
+                                        .when(!is_calculating, |this| {
+                                            this.on_click(cx.listener(
+                                                move |this, _, _window, cx| {
+                                                    if let Some(path) = FileDialog::new()
+                                                        .set_title("选择一个文件")
+                                                        .pick_file()
+                                                    {
+                                                        this.calculate_sm3_hash(path, cx);
+                                                    }
+                                                },
+                                            ))
+                                        }),
+                                ),
+                            )
+                            // 文件信息 + 计算进度卡片
+                            .children(has_file.then(|| {
+                                div()
+                                    .mt(px(34.))
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .rounded_xl()
+                                    .border_1()
+                                    .border_color(card_border)
+                                    .bg(card_bg)
+                                    .px(px(26.))
+                                    .py(px(24.))
+                                    .child(info_row(
+                                        ICON_FILE,
+                                        "文件名",
+                                        file_name.clone(),
+                                        muted_color,
+                                        body_color,
+                                    ))
+                                    .child(div().mt(px(18.)).child(info_row(
+                                        ICON_FILE,
+                                        "文件大小",
+                                        file_detail.clone(),
+                                        muted_color,
+                                        body_color,
+                                    )))
+                                    .child(div().my(px(22.)).h(px(1.)).w_full().bg(divider_color))
+                                    .child(
+                                        div()
+                                            .text_size(px(16.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(body_color)
+                                            .child("SM3计算进度"),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(14.))
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap(px(16.))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .text_size(px(16.))
+                                                    .child(
+                                                        div()
+                                                            .text_color(status_color)
+                                                            .child(status_label.clone()),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .ml(px(6.))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(primary_color)
+                                                            .child(percent_text.clone()),
+                                                    )
+                                                    .child(
+                                                        div().text_color(body_color).child(
+                                                            format!(" {}", progress_size_text),
+                                                        ),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_size(px(14.))
+                                                    .text_color(muted_color)
+                                                    .child(timer_text.clone()),
+                                            ),
+                                    )
+                                    .child(div().mt(px(14.)).child(sm3_progress_bar(
+                                        percent as f32,
+                                        is_dark,
+                                        is_failed,
+                                    )))
+                                    .child(
+                                        div()
+                                            .mt(px(14.))
+                                            .text_size(px(14.))
+                                            .text_color(hint_color)
+                                            .child(hint_text),
+                                    )
+                            }))
+                            // SM3 摘要结果
+                            .children(hash.as_ref().map(|hash| {
+                                let ok = hash != "计算失败";
+                                let hash_for_copy = hash.clone();
+                                div()
+                                    .mt(px(42.))
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(14.))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(10.))
+                                            .child(
+                                                div()
+                                                    .text_size(px(22.))
+                                                    .text_color(muted_color)
+                                                    .child("#"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(18.))
+                                                    .text_color(title_color)
+                                                    .child("SM3摘要结果"),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(14.))
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .h(px(56.))
+                                                    .px(px(20.))
+                                                    .flex()
+                                                    .items_center()
+                                                    .rounded_lg()
+                                                    .border_1()
+                                                    .border_color(card_border)
+                                                    .bg(subtle_bg)
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(14.))
+                                                            .font_family("Consolas")
+                                                            .truncate()
+                                                            .text_color(if ok {
+                                                                body_color
+                                                            } else {
+                                                                danger_color
+                                                            })
+                                                            .child(hash.clone()),
+                                                    ),
+                                            )
+                                            .when(ok, |row| {
+                                                row.child(
+                                                    div()
+                                                        .id("copy_btn")
+                                                        .flex_none()
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .gap(px(8.))
+                                                        .w(px(116.))
+                                                        .h(px(56.))
+                                                        .rounded_lg()
+                                                        .border_1()
+                                                        .border_color(card_border)
+                                                        .bg(subtle_bg)
+                                                        .text_size(px(16.))
+                                                        .text_color(body_color)
+                                                        .cursor_pointer()
+                                                        .hover(|style| {
+                                                            style.bg(if is_dark {
+                                                                rgb(0x33363b)
+                                                            } else {
+                                                                rgb(0xf1f5f9)
+                                                            })
+                                                        })
+                                                        .active(|style| {
+                                                            style.bg(if is_dark {
+                                                                rgb(0x3b3e44)
+                                                            } else {
+                                                                rgb(0xe2e8f0)
+                                                            })
+                                                        })
+                                                        .child(icon(ICON_COPY, 17., body_color))
+                                                        .child("复制")
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _window, cx| {
+                                                                cx.write_to_clipboard(
+                                                                    ClipboardItem::new_string(
+                                                                        hash_for_copy.clone(),
+                                                                    ),
+                                                                );
+                                                                this.show_toast(
+                                                                    "SM3已复制到剪贴板",
+                                                                    cx,
+                                                                );
+                                                            },
+                                                        )),
+                                                )
+                                            }),
+                                    )
+                            })),
+                    ),
             )
-            // --- Toast 浮动提示---
+            // 底部说明
+            .child(
+                div()
+                    .flex()
+                    .justify_center()
+                    .py(px(16.))
+                    .text_size(px(13.))
+                    .text_color(footer_color)
+                    .child("Copyright (c) 2026 dousx"),
+            )
+            // --- Toast 浮动提示 ---
             .children(self.toast.as_ref().map(|(msg, _)| {
                 div()
                     .absolute()
                     .top(px(16.))
                     .right(px(16.))
-                    .px_4()
-                    .py_2()
+                    .px(px(16.))
+                    .py(px(10.))
                     .rounded_lg()
                     .shadow_lg()
-                    .bg(if is_dark {
-                        rgb(0x2d3748)
-                    } else {
-                        rgb(0xffffff)
-                    })
+                    .bg(card_bg)
                     .border_1()
-                    .border_color(if is_dark {
-                        rgb(0x4a5568)
-                    } else {
-                        rgb(0xe2e8f0)
-                    })
+                    .border_color(card_border)
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap(px(8.))
                             .child(
-                                // 使用绿色勾号文本，避免 SVG 方法缺失
                                 div()
-                                    .size(px(20.))
+                                    .size(px(18.))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .child(
                                         div()
-                                            .text_color(rgb(0x48bb78))
-                                            .text_lg()
+                                            .text_color(success_color)
+                                            .text_size(px(16.))
                                             .font_weight(FontWeight::BOLD)
                                             .child("✓"),
                                     ),
                             )
                             .child(
                                 div()
-                                    .text_color(if is_dark {
-                                        rgb(0xedf2f7)
-                                    } else {
-                                        rgb(0x2d3748)
-                                    })
-                                    .text_sm()
+                                    .text_color(body_color)
+                                    .text_size(px(13.))
                                     .child(msg.clone()),
                             ),
                     )
@@ -715,12 +1034,12 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
-                    title: Some("SM3摘要计算工具".into()),
+                    title: Some("SM3摘要工具".into()),
                     ..Default::default()
                 }),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(750.), px(450.)),
+                    size(px(920.), px(800.)),
                     cx,
                 ))),
                 ..Default::default()
