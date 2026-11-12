@@ -1,3 +1,3 @@
 # Rust+GPUI 计算sm3摘要工具
 
-![image-20261112094235702](https://cruder-figure-bed.oss-cn-beijing.aliyuncs.com/markdown/2026/11/12/09-42-36-045-01a1cd6b-cb0e-76a4-8ca6-d408db9b4a1a.png)
+![image-20261112142932545](https://cruder-figure-bed.oss-cn-beijing.aliyuncs.com/markdown/2026/11/12/14-29-32-925-01a1ce72-807d-75b4-b868-c8c31a52e339.png)
