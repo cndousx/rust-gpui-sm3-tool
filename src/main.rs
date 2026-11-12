@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -30,9 +31,151 @@ use windows::Win32::{
 const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
 
 // 界面图标（内嵌 SVG，GPUI 会按 text_color 着色）
-const ICON_FILE: &[u8] = include_bytes!("../resources/icons/file.svg");
-const ICON_FOLDER: &[u8] = include_bytes!("../resources/icons/folder.svg");
-const ICON_COPY: &[u8] = include_bytes!("../resources/icons/copy.svg");
+const ICON_FILE: &[u8] = include_bytes!("../assets/icons/file.svg");
+const ICON_FOLDER: &[u8] = include_bytes!("../assets/icons/folder.svg");
+const ICON_COPY: &[u8] = include_bytes!("../assets/icons/copy.svg");
+
+/// 自绘标题栏高度
+const TITLEBAR_HEIGHT: f32 = 40.;
+
+/// 应用图标（内嵌 ICO，解码一次后由 GPUI 资源缓存复用）
+fn app_icon() -> Arc<Image> {
+    static ICON: OnceLock<Arc<Image>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        Arc::new(Image::from_bytes(
+            ImageFormat::Ico,
+            include_bytes!("../assets/app.ico").to_vec(),
+        ))
+    })
+    .clone()
+}
+
+/// 自绘标题栏上的一个窗口控制按钮
+///
+/// `WindowControlArea` 让 Windows 后端用非客户区命中测试来处理点击：
+/// Min 最小化、Max 最大化/还原、Close 关闭，行为与系统标题栏一致
+/// （包括最大化按钮的“还原”状态和关闭前的确认流程）。
+fn window_control_button(
+    id: &'static str,
+    glyph: &'static str,
+    area: WindowControlArea,
+    is_close: bool,
+    is_dark: bool,
+    text_color: Hsla,
+) -> impl IntoElement {
+    let hover_bg: Hsla = if is_close {
+        rgb(0xe81123).into()
+    } else if is_dark {
+        rgb(0x32353a).into()
+    } else {
+        rgb(0xe5e7eb).into()
+    };
+    let active_bg: Hsla = if is_close {
+        rgb(0xf1707a).into()
+    } else if is_dark {
+        rgb(0x3f4248).into()
+    } else {
+        rgb(0xd1d5db).into()
+    };
+    let hover_fg: Hsla = if is_close {
+        rgb(0xffffff).into()
+    } else {
+        text_color
+    };
+
+    div()
+        .id(id)
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(px(46.))
+        .h_full()
+        // occlude 让按钮自身的命中盒优先于父级标题栏的 Drag 区域
+        .occlude()
+        .font_family("Segoe MDL2 Assets")
+        .text_size(px(10.))
+        .text_color(text_color)
+        .hover(move |style| style.bg(hover_bg).text_color(hover_fg))
+        .active(move |style| style.bg(active_bg).text_color(hover_fg))
+        .window_control_area(area)
+        .child(glyph)
+}
+
+/// 自绘标题栏：左侧应用名，右侧最小化 / 最大化（还原）/ 关闭
+fn app_titlebar(
+    is_dark: bool,
+    is_maximized: bool,
+    muted_color: Hsla,
+    body_color: Hsla,
+) -> impl IntoElement {
+    div()
+        .id("titlebar")
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_between()
+        .h(px(TITLEBAR_HEIGHT))
+        .w_full()
+        .pl(px(14.))
+        // 整条标题栏作为拖动区域：拖动移动窗口，双击最大化/还原
+        .window_control_area(WindowControlArea::Drag)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    img(app_icon())
+                        .flex_none()
+                        .w(px(18.))
+                        .h(px(18.))
+                        .object_fit(ObjectFit::Contain),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(muted_color)
+                        .child("SM3摘要工具"),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .h_full()
+                .child(window_control_button(
+                    "win_min",
+                    "\u{e921}",
+                    WindowControlArea::Min,
+                    false,
+                    is_dark,
+                    body_color,
+                ))
+                .child(window_control_button(
+                    if is_maximized {
+                        "win_restore"
+                    } else {
+                        "win_max"
+                    },
+                    if is_maximized { "\u{e923}" } else { "\u{e922}" },
+                    WindowControlArea::Max,
+                    false,
+                    is_dark,
+                    body_color,
+                ))
+                .child(window_control_button(
+                    "win_close",
+                    "\u{e8bb}",
+                    WindowControlArea::Close,
+                    true,
+                    is_dark,
+                    body_color,
+                )),
+        )
+}
 
 // ---------------------------------------------------------------------------
 // Windows 任务栏进度（ITaskbarList3）
@@ -676,6 +819,13 @@ impl Render for FilePickerApp {
                     rgba_u32(0x3b82f6, 0.45)
                 })
             })
+            // 自绘标题栏（替代 Windows 原生标题栏）
+            .child(app_titlebar(
+                is_dark,
+                window.is_maximized(),
+                muted_color,
+                body_color,
+            ))
             .child(
                 div()
                     .id("main_scroll")
@@ -686,7 +836,7 @@ impl Render for FilePickerApp {
                     .w_full()
                     .overflow_y_scroll()
                     .px(px(48.))
-                    .pt(px(34.))
+                    .pt(px(26.))
                     .pb(px(8.))
                     .items_center()
                     .child(
@@ -985,7 +1135,7 @@ impl Render for FilePickerApp {
             .children(self.toast.as_ref().map(|(msg, _)| {
                 div()
                     .absolute()
-                    .top(px(16.))
+                    .top(px(TITLEBAR_HEIGHT + 12.))
                     .right(px(16.))
                     .px(px(16.))
                     .py(px(10.))
@@ -1035,8 +1185,13 @@ fn main() {
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
                     title: Some("SM3摘要工具".into()),
+                    // 隐藏系统标题栏，由应用自己绘制（Windows / macOS）
+                    appears_transparent: true,
                     ..Default::default()
                 }),
+                // 窗口拖动由自绘标题栏负责（主要影响 macOS，Windows 由平台处理）
+                app_owns_titlebar_drag: true,
+                window_min_size: Some(size(px(640.), px(520.))),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
                     size(px(920.), px(800.)),
