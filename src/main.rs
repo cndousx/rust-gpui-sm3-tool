@@ -1262,10 +1262,11 @@ fn main() {
                 }),
                 // 窗口拖动由自绘标题栏负责（主要影响 macOS，Windows 由平台处理）
                 app_owns_titlebar_drag: true,
-                window_min_size: Some(size(px(640.), px(520.))),
+                // 限制窗口大小，保证不出现滚动条
+                window_min_size: Some(size(px(810.), px(800.))),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(920.), px(800.)),
+                    size(px(810.), px(800.)),
                     cx,
                 ))),
                 ..Default::default()
