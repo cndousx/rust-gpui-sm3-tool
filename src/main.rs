@@ -36,7 +36,7 @@ const ICON_FOLDER: &[u8] = include_bytes!("../assets/icons/folder.svg");
 const ICON_COPY: &[u8] = include_bytes!("../assets/icons/copy.svg");
 
 /// 自绘标题栏高度
-const TITLEBAR_HEIGHT: f32 = 40.;
+const TITLEBAR_HEIGHT: f32 = 34.;
 
 /// 主题模式：跟随系统 / 深色 / 浅色
 ///
@@ -188,7 +188,7 @@ fn window_control_button(
         .flex()
         .items_center()
         .justify_center()
-        .w(px(46.))
+        .w(px(40.))
         .h_full()
         // occlude 让按钮自身的命中盒优先于父级标题栏的 Drag 区域
         .occlude()
@@ -262,7 +262,7 @@ fn theme_toggle_button(
         .flex()
         .items_center()
         .justify_center()
-        .w(px(42.))
+        .w(px(38.))
         .h_full()
         // occlude 避免点击被标题栏的拖动区域吞掉
         .occlude()
@@ -303,7 +303,7 @@ fn app_titlebar(
         .justify_between()
         .h(px(TITLEBAR_HEIGHT))
         .w_full()
-        .pl(px(14.))
+        .pl(px(12.))
         // 标题栏用比页面稍亮的底色 + 细分隔线，和页面背景区分开
         .bg(bar_bg)
         .border_b_1()
@@ -314,17 +314,17 @@ fn app_titlebar(
             div()
                 .flex()
                 .items_center()
-                .gap(px(8.))
+                .gap(px(6.))
                 .child(
                     img(app_icon())
                         .flex_none()
-                        .w(px(18.))
-                        .h(px(18.))
+                        .w(px(16.))
+                        .h(px(16.))
                         .object_fit(ObjectFit::Contain),
                 )
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(px(12.))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(muted_color)
                         .child("SM3摘要工具"),
@@ -861,14 +861,14 @@ fn info_row(
     div()
         .flex()
         .items_center()
-        .gap(px(12.))
-        .child(icon(icon_data, 19., icon_color))
+        .gap(px(10.))
+        .child(icon(icon_data, 18., icon_color))
         .child(
             div()
                 .flex()
                 .items_center()
                 .min_w_0()
-                .text_size(px(16.))
+                .text_size(px(14.))
                 .child(
                     div()
                         .flex_none()
@@ -1049,9 +1049,9 @@ impl Render for FilePickerApp {
                     .min_h_0()
                     .w_full()
                     .overflow_y_scroll()
-                    .px(px(48.))
-                    .pt(px(26.))
-                    .pb(px(8.))
+                    .px(px(32.))
+                    .pt(px(18.))
+                    .pb(px(6.))
                     .items_center()
                     .child(
                         div()
@@ -1067,32 +1067,32 @@ impl Render for FilePickerApp {
                                     .items_center()
                                     .child(
                                         div()
-                                            .text_size(px(34.))
+                                            .text_size(px(28.))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(title_color)
                                             .child("SM3摘要计算工具"),
                                     )
                                     .child(
                                         div()
-                                            .mt(px(8.))
-                                            .text_size(px(18.))
+                                            .mt(px(6.))
+                                            .text_size(px(15.))
                                             .text_color(subtitle_color)
                                             .child("选择文件并计算 SM3 摘要"),
                                     ),
                             )
                             // 选择文件按钮
                             .child(
-                                div().mt(px(34.)).flex().justify_center().child(
+                                div().mt(px(24.)).flex().justify_center().child(
                                     div()
                                         .id("pick_file")
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .gap(px(9.))
-                                        .w(px(200.))
-                                        .h(px(52.))
+                                        .gap(px(8.))
+                                        .w(px(184.))
+                                        .h(px(44.))
                                         .rounded_lg()
-                                        .text_size(px(17.))
+                                        .text_size(px(15.))
                                         .text_color(rgb(0xffffff))
                                         .cursor(if is_calculating {
                                             CursorStyle::OperationNotAllowed
@@ -1141,7 +1141,7 @@ impl Render for FilePickerApp {
                             // 文件信息 + 计算进度卡片
                             .children(has_file.then(|| {
                                 div()
-                                    .mt(px(34.))
+                                    .mt(px(24.))
                                     .w_full()
                                     .flex()
                                     .flex_col()
@@ -1149,8 +1149,8 @@ impl Render for FilePickerApp {
                                     .border_1()
                                     .border_color(card_border)
                                     .bg(card_bg)
-                                    .px(px(26.))
-                                    .py(px(24.))
+                                    .px(px(20.))
+                                    .py(px(18.))
                                     .child(info_row(
                                         ICON_FILE,
                                         "文件名",
@@ -1158,33 +1158,33 @@ impl Render for FilePickerApp {
                                         muted_color,
                                         body_color,
                                     ))
-                                    .child(div().mt(px(18.)).child(info_row(
+                                    .child(div().mt(px(12.)).child(info_row(
                                         ICON_FILE,
                                         "文件大小",
                                         file_detail.clone(),
                                         muted_color,
                                         body_color,
                                     )))
-                                    .child(div().my(px(22.)).h(px(1.)).w_full().bg(divider_color))
+                                    .child(div().my(px(16.)).h(px(1.)).w_full().bg(divider_color))
                                     .child(
                                         div()
-                                            .text_size(px(16.))
+                                            .text_size(px(14.))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(body_color)
                                             .child("SM3计算进度"),
                                     )
                                     .child(
                                         div()
-                                            .mt(px(14.))
+                                            .mt(px(10.))
                                             .flex()
                                             .items_center()
                                             .justify_between()
-                                            .gap(px(16.))
+                                            .gap(px(12.))
                                             .child(
                                                 div()
                                                     .flex()
                                                     .items_center()
-                                                    .text_size(px(16.))
+                                                    .text_size(px(14.))
                                                     .child(
                                                         div()
                                                             .text_color(status_color)
@@ -1206,20 +1206,20 @@ impl Render for FilePickerApp {
                                             .child(
                                                 div()
                                                     .flex_none()
-                                                    .text_size(px(14.))
+                                                    .text_size(px(13.))
                                                     .text_color(muted_color)
                                                     .child(timer_text.clone()),
                                             ),
                                     )
-                                    .child(div().mt(px(14.)).child(sm3_progress_bar(
+                                    .child(div().mt(px(10.)).child(sm3_progress_bar(
                                         percent as f32,
                                         is_dark,
                                         is_failed,
                                     )))
                                     .child(
                                         div()
-                                            .mt(px(14.))
-                                            .text_size(px(14.))
+                                            .mt(px(10.))
+                                            .text_size(px(13.))
                                             .text_color(hint_color)
                                             .child(hint_text),
                                     )
@@ -1229,25 +1229,25 @@ impl Render for FilePickerApp {
                                 let ok = hash != "计算失败";
                                 let hash_for_copy = hash.clone();
                                 div()
-                                    .mt(px(42.))
+                                    .mt(px(28.))
                                     .w_full()
                                     .flex()
                                     .flex_col()
-                                    .gap(px(14.))
+                                    .gap(px(10.))
                                     .child(
                                         div()
                                             .flex()
                                             .items_center()
-                                            .gap(px(10.))
+                                            .gap(px(8.))
                                             .child(
                                                 div()
-                                                    .text_size(px(22.))
+                                                    .text_size(px(18.))
                                                     .text_color(muted_color)
                                                     .child("#"),
                                             )
                                             .child(
                                                 div()
-                                                    .text_size(px(18.))
+                                                    .text_size(px(15.))
                                                     .text_color(title_color)
                                                     .child("SM3摘要结果"),
                                             ),
@@ -1256,13 +1256,13 @@ impl Render for FilePickerApp {
                                         div()
                                             .flex()
                                             .items_center()
-                                            .gap(px(14.))
+                                            .gap(px(10.))
                                             .child(
                                                 div()
                                                     .flex_1()
                                                     .min_w_0()
-                                                    .h(px(56.))
-                                                    .px(px(20.))
+                                                    .h(px(44.))
+                                                    .px(px(16.))
                                                     .flex()
                                                     .items_center()
                                                     .rounded_lg()
@@ -1271,7 +1271,7 @@ impl Render for FilePickerApp {
                                                     .bg(subtle_bg)
                                                     .child(
                                                         div()
-                                                            .text_size(px(14.))
+                                                            .text_size(px(13.))
                                                             .font_family("Consolas")
                                                             .truncate()
                                                             .text_color(if ok {
@@ -1290,14 +1290,14 @@ impl Render for FilePickerApp {
                                                         .flex()
                                                         .items_center()
                                                         .justify_center()
-                                                        .gap(px(8.))
-                                                        .w(px(116.))
-                                                        .h(px(56.))
+                                                        .gap(px(6.))
+                                                        .w(px(100.))
+                                                        .h(px(44.))
                                                         .rounded_lg()
                                                         .border_1()
                                                         .border_color(card_border)
                                                         .bg(subtle_bg)
-                                                        .text_size(px(16.))
+                                                        .text_size(px(14.))
                                                         .text_color(body_color)
                                                         .cursor_pointer()
                                                         .hover(|style| {
@@ -1340,7 +1340,7 @@ impl Render for FilePickerApp {
                 div()
                     .flex()
                     .justify_center()
-                    .py(px(16.))
+                    .py(px(12.))
                     .text_size(px(13.))
                     .text_color(footer_color)
                     .child("Copyright (c) 2026 dousx"),
@@ -1406,10 +1406,10 @@ fn main() {
                 // 窗口拖动由自绘标题栏负责（主要影响 macOS，Windows 由平台处理）
                 app_owns_titlebar_drag: true,
                 // 限制窗口大小，保证不出现滚动条
-                window_min_size: Some(size(px(810.), px(800.))),
+                window_min_size: Some(size(px(720.), px(680.))),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(810.), px(800.)),
+                    size(px(720.), px(680.)),
                     cx,
                 ))),
                 ..Default::default()
