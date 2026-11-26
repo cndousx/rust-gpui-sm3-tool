@@ -38,6 +38,105 @@ const ICON_COPY: &[u8] = include_bytes!("../assets/icons/copy.svg");
 /// 自绘标题栏高度
 const TITLEBAR_HEIGHT: f32 = 40.;
 
+/// 主题模式：跟随系统 / 深色 / 浅色
+///
+/// 默认跟随系统，用户点击标题栏按钮后在三者之间循环切换，
+/// 选择结果会保存到系统 AppData 目录，下次启动时恢复。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ThemeMode {
+    System,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    /// 当前模式是否应使用深色配色
+    fn is_dark(self, system_dark: bool) -> bool {
+        match self {
+            ThemeMode::Dark => true,
+            ThemeMode::Light => false,
+            ThemeMode::System => system_dark,
+        }
+    }
+
+    /// 点击按钮后切换到的下一个模式：跟随系统 -> 深色 -> 浅色 -> 跟随系统
+    fn next(self) -> Self {
+        match self {
+            ThemeMode::System => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::System,
+        }
+    }
+
+    /// 标题栏按钮图标（Segoe MDL2 Assets）
+    fn glyph(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "\u{e708}",   // 月亮
+            ThemeMode::Light => "\u{e706}",  // 太阳
+            ThemeMode::System => "\u{e790}", // 调色板（跟随系统主题）
+        }
+    }
+
+    /// 当前模式的显示名称（用于悬浮提示）
+    fn label(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "深色主题",
+            ThemeMode::Light => "浅色主题",
+            ThemeMode::System => "跟随系统主题",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            ThemeMode::System => "system",
+            ThemeMode::Dark => "dark",
+            ThemeMode::Light => "light",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value.trim() {
+            "dark" => ThemeMode::Dark,
+            "light" => ThemeMode::Light,
+            _ => ThemeMode::System,
+        }
+    }
+}
+
+/// 主题配置目录：Windows 下为 `%APPDATA%`，其余平台回退到 `~/.config`。
+fn theme_config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        return std::env::var_os("APPDATA").map(PathBuf::from);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        return std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"));
+    }
+}
+
+/// 主题配置文件的完整路径
+fn theme_config_path() -> Option<PathBuf> {
+    Some(theme_config_dir()?.join("sm3-tool").join("theme.txt"))
+}
+
+/// 启动时读取上次保存的主题模式，读取失败或内容未知时回退到“跟随系统”
+fn load_theme_mode() -> ThemeMode {
+    match theme_config_path().and_then(|path| std::fs::read_to_string(path).ok()) {
+        Some(contents) => ThemeMode::from_str(&contents),
+        None => ThemeMode::System,
+    }
+}
+
+/// 保存当前主题模式，失败不影响应用运行
+fn save_theme_mode(mode: ThemeMode) {
+    let Some(path) = theme_config_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, mode.as_str());
+}
+
 /// 应用图标（内嵌 ICO，解码一次后由 GPUI 资源缓存复用）
 fn app_icon() -> Arc<Image> {
     static ICON: OnceLock<Arc<Image>> = OnceLock::new();
@@ -102,10 +201,47 @@ fn window_control_button(
         .child(glyph)
 }
 
+/// 主题按钮悬浮提示
+struct ThemeTooltip {
+    text: SharedString,
+    is_dark: bool,
+}
+
+impl Render for ThemeTooltip {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let (bg, border, fg): (Hsla, Hsla, Hsla) = if self.is_dark {
+            (
+                rgb(0x212226).into(),
+                rgb(0x2e3034).into(),
+                rgb(0xe7e7ea).into(),
+            )
+        } else {
+            (
+                rgb(0xffffff).into(),
+                rgb(0xe5e7eb).into(),
+                rgb(0x1f2937).into(),
+            )
+        };
+
+        div()
+            .px(px(10.))
+            .py(px(6.))
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(bg)
+            .shadow_lg()
+            .text_size(px(13.))
+            .text_color(fg)
+            .child(self.text.clone())
+    }
+}
+
 /// 标题栏上的主题切换按钮（不参与系统窗口控制区域）
 fn theme_toggle_button(
     glyph: &'static str,
     is_dark: bool,
+    tooltip: SharedString,
     text_color: Hsla,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
@@ -137,6 +273,14 @@ fn theme_toggle_button(
         .hover(move |style| style.bg(hover_bg))
         .active(move |style| style.bg(active_bg))
         .child(glyph)
+        .tooltip(move |window, cx| {
+            let is_dark = matches!(
+                window.appearance(),
+                WindowAppearance::Dark | WindowAppearance::VibrantDark
+            );
+            let text = tooltip.clone();
+            cx.new(move |_| ThemeTooltip { text, is_dark }).into()
+        })
         .on_click(on_click)
 }
 
@@ -144,6 +288,7 @@ fn theme_toggle_button(
 fn app_titlebar(
     is_dark: bool,
     is_maximized: bool,
+    theme_mode: ThemeMode,
     muted_color: Hsla,
     body_color: Hsla,
     bar_bg: Hsla,
@@ -192,8 +337,9 @@ fn app_titlebar(
                 .items_center()
                 .h_full()
                 .child(theme_toggle_button(
-                    if is_dark { "\u{e706}" } else { "\u{e708}" },
+                    theme_mode.glyph(),
                     is_dark,
+                    theme_mode.label().into(),
                     body_color,
                     on_toggle_theme,
                 ))
@@ -372,8 +518,8 @@ struct FilePickerApp {
     started_at: Option<Instant>,
     /// 计算结束后的总耗时，保证完成后计时不再继续增长
     finished_elapsed: Option<Duration>,
-    /// 用户手动选择的主题：None 表示跟随系统，Some(true) 深色，Some(false) 浅色
-    theme_override: Option<bool>,
+    /// 当前主题模式：跟随系统 / 深色 / 浅色
+    theme_mode: ThemeMode,
 }
 
 impl FilePickerApp {
@@ -390,7 +536,7 @@ impl FilePickerApp {
             is_dragging_over: false,
             started_at: None,
             finished_elapsed: None,
-            theme_override: None,
+            theme_mode: load_theme_mode(),
         }
     }
 
@@ -747,7 +893,7 @@ impl Render for FilePickerApp {
             WindowAppearance::Dark | WindowAppearance::VibrantDark
         );
         // 默认跟随系统，用户点击标题栏按钮后以手动选择为准
-        let is_dark = self.theme_override.unwrap_or(system_dark);
+        let is_dark = self.theme_mode.is_dark(system_dark);
 
         // 深色主题尽量贴近最终效果图；浅色主题使用对应的中性色。
         let (
@@ -847,13 +993,9 @@ impl Render for FilePickerApp {
         };
 
         let toggle_theme = cx.listener(
-            |this, _event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>| {
-                let system_dark = matches!(
-                    window.appearance(),
-                    WindowAppearance::Dark | WindowAppearance::VibrantDark
-                );
-                let currently_dark = this.theme_override.unwrap_or(system_dark);
-                this.theme_override = Some(!currently_dark);
+            |this, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>| {
+                this.theme_mode = this.theme_mode.next();
+                save_theme_mode(this.theme_mode);
                 cx.notify();
             },
         );
@@ -891,6 +1033,7 @@ impl Render for FilePickerApp {
             .child(app_titlebar(
                 is_dark,
                 window.is_maximized(),
+                self.theme_mode,
                 muted_color,
                 body_color,
                 card_bg,
