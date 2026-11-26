@@ -130,7 +130,9 @@ fn load_theme_mode() -> ThemeMode {
 
 /// 保存当前主题模式，失败不影响应用运行
 fn save_theme_mode(mode: ThemeMode) {
-    let Some(path) = theme_config_path() else { return };
+    let Some(path) = theme_config_path() else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
